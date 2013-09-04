@@ -181,13 +181,13 @@ class RequestsTestCase(unittest.TestCase):
         assert r.json()['cookies']['foo'] == 'bar'
         # Make sure the session cj is still the custom one
         assert s.cookies is cj
-    
+
     def test_requests_in_history_are_not_overridden(self):
         resp = requests.get(httpbin('redirect/3'))
         urls = [r.url for r in resp.history]
         req_urls = [r.request.url for r in resp.history]
         self.assertEquals(urls, req_urls)
-        
+
     def test_user_agent_transfers(self):
 
         heads = {
@@ -245,7 +245,7 @@ class RequestsTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
         s = requests.session()
-        
+
         # Should use netrc and work.
         r = s.get(url)
         self.assertEqual(r.status_code, 200)
@@ -267,9 +267,25 @@ class RequestsTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
         s = requests.session()
-        s.auth = auth
+        s.auth = HTTPDigestAuth('user', 'pass')
         r = s.get(url)
         self.assertEqual(r.status_code, 200)
+
+    def test_DIGEST_AUTH_RETURNS_COOKIE(self):
+        url = httpbin('digest-auth', 'auth', 'user', 'pass')
+        auth = HTTPDigestAuth('user', 'pass')
+        r = requests.get(url)
+        assert r.cookies['fake'] == 'fake_value'
+
+        r = requests.get(url, auth=auth)
+        assert r.status_code == 200
+
+    def test_DIGEST_AUTH_SETS_SESSION_COOKIES(self):
+        url = httpbin('digest-auth', 'auth', 'user', 'pass')
+        auth = HTTPDigestAuth('user', 'pass')
+        s = requests.Session()
+        s.get(url, auth=auth)
+        assert s.cookies['fake'] == 'fake_value'
 
     def test_DIGEST_STREAM(self):
 
@@ -556,17 +572,16 @@ class RequestsTestCase(unittest.TestCase):
         s.headers.update({'accept': 'application/json'})
         r = s.get(httpbin('get'))
         headers = r.request.headers
-        # ASCII encode because of key comparison changes in py3
         self.assertEqual(
-            headers['accept'.encode('ascii')],
+            headers['accept'],
             'application/json'
         )
         self.assertEqual(
-            headers['Accept'.encode('ascii')],
+            headers['Accept'],
             'application/json'
         )
         self.assertEqual(
-            headers['ACCEPT'.encode('ascii')],
+            headers['ACCEPT'],
             'application/json'
         )
 
@@ -638,49 +653,15 @@ class RequestsTestCase(unittest.TestCase):
         r = requests.Request('GET', url).prepare()
         self.assertEqual(r.url, url)
 
+    def test_header_keys_are_native(self):
+        headers = {u'unicode': 'blah', 'byte'.encode('ascii'): 'blah'}
+        r = requests.Request('GET', httpbin('get'), headers=headers)
+        p = r.prepare()
 
-class TestContentEncodingDetection(unittest.TestCase):
-
-    def test_none(self):
-        encodings = requests.utils.get_encodings_from_content('')
-        self.assertEqual(len(encodings), 0)
-
-    def test_html_charset(self):
-        """HTML5 meta charset attribute"""
-        content = '<meta charset="UTF-8">'
-        encodings = requests.utils.get_encodings_from_content(content)
-        self.assertEqual(len(encodings), 1)
-        self.assertEqual(encodings[0], 'UTF-8')
-
-    def test_html4_pragma(self):
-        """HTML4 pragma directive"""
-        content = '<meta http-equiv="Content-type" content="text/html;charset=UTF-8">'
-        encodings = requests.utils.get_encodings_from_content(content)
-        self.assertEqual(len(encodings), 1)
-        self.assertEqual(encodings[0], 'UTF-8')
-
-    def test_xhtml_pragma(self):
-        """XHTML 1.x served with text/html MIME type"""
-        content = '<meta http-equiv="Content-type" content="text/html;charset=UTF-8" />'
-        encodings = requests.utils.get_encodings_from_content(content)
-        self.assertEqual(len(encodings), 1)
-        self.assertEqual(encodings[0], 'UTF-8')
-
-    def test_xml(self):
-        """XHTML 1.x served as XML"""
-        content = '<?xml version="1.0" encoding="UTF-8"?>'
-        encodings = requests.utils.get_encodings_from_content(content)
-        self.assertEqual(len(encodings), 1)
-        self.assertEqual(encodings[0], 'UTF-8')
-
-    def test_precedence(self):
-        content = '''
-        <?xml version="1.0" encoding="XML"?>
-        <meta charset="HTML5">
-        <meta http-equiv="Content-type" content="text/html;charset=HTML4" />
-        '''.strip()
-        encodings = requests.utils.get_encodings_from_content(content)
-        self.assertEqual(encodings, ['HTML5', 'HTML4', 'XML'])
+        # This is testing that they are builtin strings. A bit weird, but there
+        # we go.
+        self.assertTrue('unicode' in p.headers.keys())
+        self.assertTrue('byte' in p.headers.keys())
 
 
 class TestCaseInsensitiveDict(unittest.TestCase):
